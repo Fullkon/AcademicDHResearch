@@ -37,3 +37,6 @@ npm-debug.log*
 # Temp files
 jieba.cache
 *.cache
+
+# Corpus files (large binary/text data, 75MB+)
+/corpus/

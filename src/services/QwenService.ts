@@ -126,6 +126,32 @@ export interface ResultsAnalysisResult {
   raw_text?: string;
 }
 
+export interface ResearchFrameworkResult {
+  research_title: string;
+  research_questions: string[];
+  theoretical_model: string;
+  methodology_overview: string;
+  innovation_points: string[];
+  expected_academic_contribution: string;
+  feasibility_assessment: string;
+  mode?: string;
+  raw_text?: string;
+}
+
+export interface TranslateKeywordsResult {
+  translated: Record<string, string>;
+  mode?: string;
+}
+
+export interface NlToCqpResult {
+  intent: string;
+  searchType: 'word' | 'regex' | 'phrase' | 'collocation';
+  query: string;
+  contextSize: number;
+  explanation: string;
+  mode?: string;
+}
+
 export interface QwenService {
   // 健康检查
   checkHealth: () => Promise<{ status: string; model: string; apiConfigured: boolean }>;
@@ -178,6 +204,24 @@ export interface QwenService {
     texts: string[];
     topicCount?: number;
   }) => Promise<Record<string, unknown>>;
+
+  // 研究框架设计
+  generateResearchFramework: (params: {
+    topic: string;
+    reviewSummary: string;
+    researchGaps: string[];
+    keywords: string[];
+  }) => Promise<ResearchFrameworkResult>;
+
+  // 关键词双向翻译
+  translateKeywords: (params: {
+    keywords: string[];
+  }) => Promise<TranslateKeywordsResult>;
+
+  // 自然语言 → CQP查询
+  nlToCqp: (params: {
+    query: string;
+  }) => Promise<NlToCqpResult>;
 }
 
 // ── 实现 ──
@@ -210,6 +254,18 @@ export const qwenService: QwenService = {
 
   async analyzeSemantic(params) {
     return postQwen('/api/deep-semantic-analysis', params as Record<string, unknown>);
+  },
+
+  async generateResearchFramework(params) {
+    return postQwen<ResearchFrameworkResult>('/api/generate-research-framework', params as Record<string, unknown>);
+  },
+
+  async translateKeywords(params) {
+    return postQwen<TranslateKeywordsResult>('/api/translate-keywords', params as Record<string, unknown>);
+  },
+
+  async nlToCqp(params) {
+    return postQwen<NlToCqpResult>('/api/nl-to-cqp', params as Record<string, unknown>);
   },
 };
 

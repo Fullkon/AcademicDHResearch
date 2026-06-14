@@ -325,6 +325,73 @@ class LiteratureService {
     };
   }
 
+  /**
+   * 双语联合搜索 (zhKeywords → OpenAlex, enKeywords → Semantic Scholar)
+   * 用于跨语言文献检索：中文关键词查中文库，英文关键词查英文库
+   */
+  async searchAllBilingual(
+    zhKeywords: string[],
+    enKeywords: string[],
+    limit: number = 30,
+    dateRange?: { start: number; end: number },
+  ): Promise<LiteratureSearchResult> {
+    const zhQuery = zhKeywords.join(' ') || enKeywords.join(' ');  // 万一没中文就用英文
+    const enQuery = enKeywords.join(' ') || zhKeywords.join(' ');  // 万一没英文就用中文
+
+    const halfLimit = Math.floor(limit / 2);
+
+    const oaPromises: Promise<LiteratureSearchResult>[] = [
+      // OpenAlex：用中文关键词，不加语言过滤（扩大命中）
+      searchOpenAlex(zhQuery, halfLimit, 1, ''),
+    ];
+    if (enQuery !== zhQuery) {
+      // OpenAlex 也搜一遍英文，提高查全率
+      oaPromises.push(searchOpenAlex(enQuery, halfLimit, 1, ''));
+    }
+
+    const ssPromise = searchSemanticScholar(enQuery, halfLimit, 0, dateRange?.start, dateRange?.end);
+
+    const allResults = await Promise.all([...oaPromises, ssPromise]);
+
+    // 去重
+    const seen = new Set<string>();
+    const merged: Reference[] = [];
+    for (const batch of allResults) {
+      for (const r of batch.results) {
+        const key = r.doi || r.title?.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(r);
+        }
+      }
+    }
+
+    const total = merged.length;
+
+    if (total === 0) {
+      const mockResults = mockReferences.filter(ref =>
+        [...zhKeywords, ...enKeywords].some(kw =>
+          ref.title.toLowerCase().includes(kw.toLowerCase())
+        )
+      );
+      return {
+        total: mockResults.length,
+        results: mockResults,
+        facets: [
+          { field: 'source', values: [{ label: 'OpenAlex', count: 0 }, { label: 'Semantic Scholar', count: 0 }] },
+        ],
+      };
+    }
+
+    return {
+      total,
+      results: merged.slice(0, limit),
+      facets: [
+        { field: 'source', values: [{ label: 'OpenAlex', count: merged.filter(r => r.source === 'openalex').length }, { label: 'Semantic Scholar', count: merged.filter(r => r.source === 'semantic_scholar').length }] },
+      ],
+    };
+  }
+
   async getById(id: string): Promise<Reference | null> {
     // 先从 mock 中查找
     const mock = mockReferences.find(r => r.id === id);

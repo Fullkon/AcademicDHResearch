@@ -8,12 +8,71 @@ import {
 } from '@/utils/mockData';
 
 /**
- * 语料库检索服务 - 模拟MCP调用语料库工具
+ * 语料库检索服务 - 支持本地 CQP 查询引擎
  * 支持：索引行、搭配、主题语义、情感态度分析
+ * 新增：CQP 自然语言查询（通过本地 cqp-search 服务）
  */
+
+const CQP_BASE_URL = '/api/cqp';
+
 class CorpusService {
   private mockDelay(ms: number = 600): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /** 直接执行 CQP 查询（调用本地 cqp-search 服务） */
+  async cqpSearch(params: {
+    query: string;
+    searchType?: 'word' | 'regex' | 'phrase';
+    contextSize?: number;
+    maxResults?: number;
+    corpus?: string;
+  }) {
+    try {
+      const resp = await fetch(`${CQP_BASE_URL}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!resp.ok) throw new Error(`CQP error: ${resp.status}`);
+      return resp.json();
+    } catch (e) {
+      console.warn('[CQP] search failed, fallback to mock:', e);
+      return null;
+    }
+  }
+
+  /** CQP 搭配分析 */
+  async cqpCollocation(params: {
+    query: string;
+    windowSize?: number;
+    maxResults?: number;
+    corpus?: string;
+  }) {
+    try {
+      const resp = await fetch(`${CQP_BASE_URL}/collocation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!resp.ok) throw new Error(`CQP error: ${resp.status}`);
+      return resp.json();
+    } catch (e) {
+      console.warn('[CQP] collocation failed, fallback to mock:', e);
+      return null;
+    }
+  }
+
+  /** 获取 CQP 支持的语料列表 */
+  async getCqpCorpora(): Promise<{ id: string; name: string; path: string; size: string; language: string; description: string }[]> {
+    try {
+      const resp = await fetch(`${CQP_BASE_URL}/corpora`);
+      if (!resp.ok) throw new Error(`CQP error: ${resp.status}`);
+      return resp.json();
+    } catch (e) {
+      console.warn('[CQP] corpora failed:', e);
+      return [];
+    }
   }
 
   async searchConcordance(query: CorpusSearchQuery): Promise<{

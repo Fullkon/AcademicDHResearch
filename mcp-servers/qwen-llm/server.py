@@ -487,6 +487,135 @@ def deep_semantic_analysis():
     return jsonify(result)
 
 
+# ── 8. 关键词双向翻译 ──
+@app.route("/api/translate-keywords", methods=["POST"])
+def translate_keywords():
+    """
+    将关键词进行中⇄英双向翻译，用于跨语言文献检索：
+    - 中文关键词 → 英文翻译
+    - 英文关键词 → 中文翻译
+    返回 translated: { original: translation } 字典
+    """
+    data = request.json or {}
+    keywords = data.get("keywords", [])
+    if not keywords:
+        return jsonify({"translated": {}})
+
+    kw_list = "\n".join(f"{i+1}. {kw}" for i, kw in enumerate(keywords))
+
+    prompt = f"""请将以下学术关键词进行双向翻译（中文翻译为英文，英文翻译为中文），确保翻译准确、符合学术规范。
+
+关键词列表：
+{kw_list}
+
+请输出一个JSON对象，格式为：
+{{
+  "translated": {{
+    "原始关键词1": "翻译后的关键词1",
+    "原始关键词2": "翻译后的关键词2"
+  }}
+}}
+
+注意：
+- 中文关键词翻译为英文时，使用学术领域通用的英文术语
+- 英文关键词翻译为中文时，使用学术领域通用的中文术语
+- 对于专有名词（如"语料库语言学"→"Corpus Linguistics"），需要保持专业准确性
+- 多义词根据上下文选择最可能的学术含义
+- 只输出JSON，不要有其他内容"""
+
+    result = call_qwen_json(prompt, SYSTEM_RESEARCH)
+    return jsonify(result)
+
+
+# ── 9. 研究框架设计 ──
+@app.route("/api/generate-research-framework", methods=["POST"])
+def generate_research_framework():
+    """
+    基于文献综述中的研究缺口，设计完整的研究框架：
+    - 具体研究问题
+    - 理论模型/概念框架
+    - 研究方法论路径
+    - 预期创新点
+    """
+    data = request.json or {}
+    topic = data.get("topic", "")
+    review_summary = data.get("reviewSummary", "")
+    research_gaps = data.get("researchGaps", [])
+    keywords = data.get("keywords", [])
+
+    gaps_text = "\n".join(f"{i+1}. {g}" for i, g in enumerate(research_gaps)) if research_gaps else "待从综述中提取"
+
+    prompt = f"""请基于以下文献综述的研究缺口，为"{topic}"设计一个完整的研究框架。
+
+文献综述要点：{review_summary[:500]}
+研究缺口：
+{gaps_text}
+关键词：{", ".join(keywords) if keywords else "未提供"}
+
+请输出一个JSON对象：
+{{
+  "research_title": "精炼后的研究标题（有学术感，20字以内）",
+  "research_questions": ["具体研究问题1（要有可操作性）", "问题2", "问题3"],
+  "theoretical_model": "理论框架或概念模型描述（200字），说明核心概念之间的关系",
+  "methodology_overview": "研究方法论总体描述（150字），包括研究范式、数据类型、分析策略",
+  "innovation_points": ["创新点1（具体说明与已有研究的不同）", "创新点2", "创新点3"],
+  "expected_academic_contribution": "预期学术贡献（100字）",
+  "feasibility_assessment": "可行性评估（100字）"
+}}
+
+请确保研究问题具体可操作、理论框架有学术依据、创新点确实区别于已有研究。以JSON格式输出。"""
+
+    result = call_qwen_json(prompt, SYSTEM_RESEARCH)
+    return jsonify(result)
+
+
+# ── 10. 自然语言 → CQP 查询转换 ──
+@app.route("/api/nl-to-cqp", methods=["POST"])
+def nl_to_cqp():
+    """
+    将用户的自然语言检索需求转换为 CQP 语料库查询语句。
+    支持：
+    - 词汇检索 → word 查询
+    - 正则模式 → regex 查询
+    - 短语/共现 → phrase/regex 查询
+    - 搭配分析 → collocation 查询
+    """
+    data = request.json or {}
+    nl_query = data.get("query", "").strip()
+    if not nl_query:
+        return jsonify({"error": "查询不能为空"}), 400
+
+    prompt = f"""你是CQP (Corpus Query Processor) 查询专家。请将用户的自然语言检索需求转换为结构化的语料库查询参数。
+
+用户查询："{nl_query}"
+
+语料库信息：本地中文古典小说语料库，包含《西游记》《红楼梦》《三国演义》等古典名著，采用UTF-8编码纯文本。
+
+请分析用户的意图，输出一个JSON对象：
+{{
+  "intent": "用户意图描述（10字以内）",
+  "searchType": "word|regex|phrase|collocation",
+  "query": "转换后的查询词/正则表达式",
+  "contextSize": 上下文窗口大小（中文字符数，默认30），
+  "explanation": "对转换逻辑的简短说明"
+}}
+
+规则：
+1. 如果用户要查找某个词/字的出现位置 → searchType="word", query=那个词（如"孙悟空"→query="孙悟空"）
+2. 如果用户描述了一个模式（如"以...开头的句子"、"包含A和B的段落"） → searchType="regex", query=对应的正则表达式（如查找包含"师徒"和"妖怪"的段落→query="师徒.*妖怪|妖怪.*师徒"）
+3. 如果用户想找A词周围N个字内的B词 → searchType="phrase" 或 "regex"
+4. 如果用户想分析某个词的搭配 → searchType="collocation"
+5. 正则表达式要实用，用Python re模块支持的语法
+6. query必须是纯文本或正则表达式，不要带引号
+7. 如果用户只是问某个词出现几次，contextSize可以设小一点（如10）
+8. 如果需要看完整句子，contextSize设为30-50
+
+只输出JSON，不要有其他内容。"""
+
+    result = call_qwen_json(prompt, SYSTEM_RESEARCH)
+    return jsonify(result)
+
+
 # ═══════════════════════════════════════
 # 启动入口
 # ═══════════════════════════════════════
