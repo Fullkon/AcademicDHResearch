@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Lightbulb, BookOpen, Target, Brain, Loader2, ArrowRight,
-  Plus, X, FileText, CheckCircle, AlertTriangle,
+  Lightbulb, BookOpen, Brain, Loader2, ArrowRight,
+  Plus, X, FileText, CheckCircle, Sparkles, AlertTriangle,
 } from 'lucide-react';
 import { useResearchStore } from '@/stores/useResearchStore';
-import { mockLiteratureReview } from '@/utils/mockData';
-import type { ResearchIdea } from '@/types';
+import { qwenService } from '@/services/QwenService';
+import type { ResearchIdea, LiteratureReview } from '@/types';
 
 export const ResearchTopicForm: React.FC = () => {
   const navigate = useNavigate();
@@ -24,7 +24,8 @@ export const ResearchTopicForm: React.FC = () => {
   const [mainRefs, setMainRefs] = useState('');
   const [existingReview, setExistingReview] = useState('');
   const [researchIdeas, setResearchIdeas] = useState<ResearchIdea[]>([]);
-  const [step, setStep] = useState(1); // 1: 基本信息 2: 文献综述 3: 研究思路
+  const [step, setStep] = useState(1);
+  const [qwenError, setQwenError] = useState('');
 
   const addKeyword = () => {
     const kw = keywordInput.trim();
@@ -45,50 +46,79 @@ export const ResearchTopicForm: React.FC = () => {
     setStep(2);
   };
 
-  const handleGenerateLiteratureReview = () => {
+  // ═══ Qwen 大模型：生成文献综述 ═══
+  const handleGenerateLiteratureReview = async () => {
+    if (!title.trim()) return;
     setGeneratingIdeas(true);
-    setTimeout(() => {
-      setLiteratureReview(mockLiteratureReview);
+    setQwenError('');
+
+    try {
+      const result = await qwenService.generateLiteratureReview({
+        topic: title,
+        existingReview,
+        references: [],
+      });
+
+      if (result.mode === 'fallback') {
+        setQwenError(result.raw_text || 'Qwen API 未配置，请设置 DASHSCOPE_API_KEY 环境变量');
+      } else {
+        const review: LiteratureReview = {
+          topic: title,
+          summary: result.summary || '',
+          keyFindings: result.key_findings || [],
+          researchGaps: result.research_gaps || [],
+          theoreticalFramework: result.theoretical_framework || '',
+          references: [],
+        };
+        if (result.methodological_trends?.length) {
+          review.theoreticalFramework += '\n\n方法趋势：' + result.methodological_trends.join('；');
+        }
+        setLiteratureReview(review);
+      }
+    } catch (e: unknown) {
+      setQwenError(`Qwen 调用失败: ${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
       setGeneratingIdeas(false);
-    }, 1500);
+    }
   };
 
-  const handleGenerateResearchIdeas = () => {
+  // ═══ Qwen 大模型：生成研究思路 ═══
+  const handleGenerateResearchIdeas = async () => {
+    if (!title.trim()) return;
     setGeneratingDesign(true);
-    setTimeout(() => {
-      const ideas: ResearchIdea[] = [
-        {
-          id: 'idea-1',
-          title: '基于语料库的主题建模与演变分析',
-          description: '利用LDA等主题建模方法，从大规模语料中提取主题分布，分析特定领域或时期的主题演变趋势。',
-          methodology: '1) 语料收集与预处理\n2) 词向量训练\n3) LDA主题建模\n4) 时序主题分布分析\n5) 统计检验',
-          expectedOutcomes: '对比不同时期的主题分布，发现主题演变规律，为学术研究提供量化证据。',
-          feasibility: 'high',
-          relatedReferences: ['ref-1', 'ref-2'],
-        },
-        {
-          id: 'idea-2',
-          title: '基于搭配分析的语义变迁研究',
-          description: '通过搭配分析和互信息统计，追踪关键词在不同时期的搭配模式变化，揭示语义变迁。',
-          methodology: '1) 分时期语料划分\n2) 搭配词提取\n3) MI/T-score计算\n4) 语义变迁可视化\n5) 定性解读',
-          expectedOutcomes: '识别关键词的语义范畴变化，构建语义变迁网络图谱。',
-          feasibility: 'high',
-          relatedReferences: ['ref-1', 'ref-5'],
-        },
-        {
-          id: 'idea-3',
-          title: '基于情感分析的态度倾向研究',
-          description: '对特定领域的文本进行情感和态度分析，揭示不同主体或时期的观点倾向和态度变化。',
-          methodology: '1) 情感词典构建/适配\n2) 文本情感标注\n3) 基于规则/ML的情感分类\n4) 态度倾向分析\n5) 因素关联分析',
-          expectedOutcomes: '量化文本中的情感倾向和态度变化，为舆情研究和历史分析提供数据支撑。',
-          feasibility: 'medium',
-          relatedReferences: ['ref-4', 'ref-3'],
-        },
-      ];
-      setResearchIdeas(ideas);
+    setQwenError('');
+
+    try {
+      const store = useResearchStore.getState();
+      const result = await qwenService.generateResearchIdeas({
+        topic: title,
+        keywords,
+        literatureReview: (store.literatureReview ?? {}) as Record<string, unknown>,
+      });
+
+      if (result.mode === 'fallback') {
+        setQwenError('Qwen API 未配置，请设置 DASHSCOPE_API_KEY');
+      } else {
+        const ideas: ResearchIdea[] = (result.ideas || []).map((idea, index) => ({
+          id: `qwen-idea-${index + 1}`,
+          title: idea.title || `研究思路 ${index + 1}`,
+          description: idea.description || '',
+          methodology: idea.methodology || '',
+          expectedOutcomes: idea.expected_outcomes || '',
+          feasibility: (idea.feasibility === 'high' || idea.feasibility === 'medium'
+            ? idea.feasibility : 'medium') as 'high' | 'medium' | 'low',
+          relatedReferences: [],
+        }));
+        setResearchIdeas(ideas);
+      }
+    } catch (e: unknown) {
+      setQwenError(`Qwen 调用失败: ${e instanceof Error ? e.message : '未知错误'}`);
+    } finally {
       setGeneratingDesign(false);
-    }, 2000);
+    }
   };
+
+  const review = useResearchStore.getState().literatureReview;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -109,6 +139,14 @@ export const ResearchTopicForm: React.FC = () => {
         ))}
       </div>
 
+      {/* Qwen 错误提示 */}
+      {qwenError && (
+        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-800 flex items-start gap-2">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <span>{qwenError}</span>
+        </div>
+      )}
+
       {/* Step 1: 研究选题 */}
       {step === 1 && (
         <div className="card">
@@ -118,7 +156,7 @@ export const ResearchTopicForm: React.FC = () => {
             </div>
             <div>
               <h2 className="text-lg font-semibold text-gray-800">研究选题</h2>
-              <p className="text-sm text-gray-500">输入您的研究主题和基本信息</p>
+              <p className="text-sm text-gray-500">输入您的研究主题，Qwen 大模型将辅助分析</p>
             </div>
           </div>
 
@@ -126,35 +164,26 @@ export const ResearchTopicForm: React.FC = () => {
             <div>
               <label className="label-text">研究标题 *</label>
               <input
-                type="text"
-                value={title}
+                type="text" value={title}
                 onChange={e => setTitle(e.target.value)}
                 placeholder="例如：基于语料库的中国现当代文学主题演变研究"
                 className="input-field"
               />
             </div>
-
             <div>
               <label className="label-text">研究描述</label>
-              <textarea
-                value={description}
-                onChange={e => setDescription(e.target.value)}
+              <textarea value={description} onChange={e => setDescription(e.target.value)}
                 placeholder="请描述您的研究问题、研究目标和预期贡献..."
-                rows={4}
-                className="input-field resize-none"
+                rows={4} className="input-field resize-none"
               />
             </div>
-
             <div>
               <label className="label-text">关键词</label>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={keywordInput}
+                <input type="text" value={keywordInput}
                   onChange={e => setKeywordInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
-                  placeholder="输入关键词后按回车添加"
-                  className="input-field flex-1"
+                  placeholder="输入关键词后按回车添加" className="input-field flex-1"
                 />
                 <button onClick={addKeyword} className="btn-secondary">添加</button>
               </div>
@@ -163,32 +192,22 @@ export const ResearchTopicForm: React.FC = () => {
                   {keywords.map(kw => (
                     <span key={kw} className="badge-blue inline-flex items-center gap-1">
                       {kw}
-                      <button onClick={() => removeKeyword(kw)} className="hover:text-blue-600">
-                        <X className="w-3 h-3" />
-                      </button>
+                      <button onClick={() => removeKeyword(kw)}><X className="w-3 h-3" /></button>
                     </span>
                   ))}
                 </div>
               )}
             </div>
-
             <div>
               <label className="label-text">主要参考文献</label>
-              <textarea
-                value={mainRefs}
-                onChange={e => setMainRefs(e.target.value)}
+              <textarea value={mainRefs} onChange={e => setMainRefs(e.target.value)}
                 placeholder="每行一条参考文献，格式：作者 (年份). 标题. 期刊."
-                rows={4}
-                className="input-field resize-none"
+                rows={4} className="input-field resize-none"
               />
             </div>
-
             <div className="flex justify-end pt-4">
-              <button
-                onClick={handleCreateProject}
-                disabled={!title.trim()}
-                className="btn-primary flex items-center gap-2"
-              >
+              <button onClick={handleCreateProject} disabled={!title.trim()}
+                className="btn-primary flex items-center gap-2">
                 下一步：文献综述 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -206,54 +225,43 @@ export const ResearchTopicForm: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">已有研究综述</h2>
-                <p className="text-sm text-gray-500">输入您了解的已有研究综述，或由AI辅助生成</p>
+                <p className="text-sm text-gray-500">输入您了解的已有研究，由通义千问大模型深度分析生成综述</p>
               </div>
             </div>
 
-            <textarea
-              value={existingReview}
-              onChange={e => setExistingReview(e.target.value)}
-              placeholder="请输入您知道的已有研究综述，包括主要研究方向、重要发现、研究方法等..."
-              rows={6}
-              className="input-field resize-none"
+            <textarea value={existingReview} onChange={e => setExistingReview(e.target.value)}
+              placeholder="请输入您知道的已有研究综述..."
+              rows={6} className="input-field resize-none"
             />
 
-            <button
-              onClick={handleGenerateLiteratureReview}
-              disabled={isGeneratingIdeas}
-              className="mt-4 btn-secondary flex items-center gap-2"
-            >
+            <button onClick={handleGenerateLiteratureReview} disabled={isGeneratingIdeas}
+              className="mt-4 btn-secondary flex items-center gap-2">
               {isGeneratingIdeas ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> 正在检索文献数据库...</>
+                <><Loader2 className="w-4 h-4 animate-spin" /> Qwen 正在深度分析文献...</>
               ) : (
-                <><Brain className="w-4 h-4" /> AI辅助生成文献综述</>
+                <><Sparkles className="w-4 h-4" /> 通义千问大模型生成文献综述</>
               )}
             </button>
           </div>
 
-          {/* 显示生成的文献综述 */}
-          {useResearchStore.getState().literatureReview && (
+          {review && (
             <div className="card border-l-4 border-l-primary-500">
-              <h3 className="font-semibold text-gray-800 mb-3">AI生成的文献综述</h3>
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-500" />
+                通义千问(大模型) 生成的文献综述
+              </h3>
               <div className="prose prose-sm max-w-none text-gray-600">
-                <p className="mb-3">{useResearchStore.getState().literatureReview?.summary}</p>
-
+                <p className="mb-3">{review.summary}</p>
                 <h4 className="text-sm font-semibold text-gray-700 mt-4 mb-2">主要发现</h4>
                 <ul className="list-disc list-inside space-y-1">
-                  {useResearchStore.getState().literatureReview?.keyFindings.map((f, i) => (
-                    <li key={i} className="text-sm">{f}</li>
-                  ))}
+                  {review.keyFindings.map((f, i) => <li key={i} className="text-sm">{f}</li>)}
                 </ul>
-
                 <h4 className="text-sm font-semibold text-gray-700 mt-4 mb-2">研究缺口</h4>
                 <ul className="list-disc list-inside space-y-1">
-                  {useResearchStore.getState().literatureReview?.researchGaps.map((g, i) => (
-                    <li key={i} className="text-sm text-orange-600">{g}</li>
-                  ))}
+                  {review.researchGaps.map((g, i) => <li key={i} className="text-sm text-orange-600">{g}</li>)}
                 </ul>
-
                 <h4 className="text-sm font-semibold text-gray-700 mt-4 mb-2">理论框架</h4>
-                <p className="text-sm">{useResearchStore.getState().literatureReview?.theoreticalFramework}</p>
+                <p className="text-sm">{review.theoreticalFramework}</p>
               </div>
             </div>
           )}
@@ -277,19 +285,16 @@ export const ResearchTopicForm: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-gray-800">研究思路</h2>
-                <p className="text-sm text-gray-500">AI辅助生成研究思路，或自行输入</p>
+                <p className="text-sm text-gray-500">通义千问大模型基于文献综述深度设计研究思路</p>
               </div>
             </div>
 
-            <button
-              onClick={handleGenerateResearchIdeas}
-              disabled={isGeneratingDesign}
-              className="btn-secondary flex items-center gap-2 mb-6"
-            >
+            <button onClick={handleGenerateResearchIdeas} disabled={isGeneratingDesign}
+              className="btn-secondary flex items-center gap-2 mb-6">
               {isGeneratingDesign ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> 正在生成研究思路...</>
+                <><Loader2 className="w-4 h-4 animate-spin" /> Qwen 正在设计研究思路...</>
               ) : (
-                <><Brain className="w-4 h-4" /> AI辅助生成研究思路</>
+                <><Sparkles className="w-4 h-4" /> 通义千问大模型设计研究思路</>
               )}
             </button>
 
@@ -325,13 +330,8 @@ export const ResearchTopicForm: React.FC = () => {
 
           <div className="flex justify-between pt-4">
             <button onClick={() => setStep(2)} className="btn-secondary">上一步</button>
-            <button
-              onClick={() => {
-                updateProjectStatus('literature_review');
-                navigate('/experiment');
-              }}
-              className="btn-primary flex items-center gap-2"
-            >
+            <button onClick={() => { updateProjectStatus('literature_review'); navigate('/experiment'); }}
+              className="btn-primary flex items-center gap-2">
               进入实验设计 <ArrowRight className="w-4 h-4" />
             </button>
           </div>
