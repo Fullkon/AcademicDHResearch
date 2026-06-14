@@ -12,7 +12,7 @@ import type {
  * 注意：首次调用可能较慢（Qwen API 响应时间 3-15秒），第二次起可启用缓存
  */
 
-const BASE_URL = import.meta.env.VITE_QWEN_URL || 'http://localhost:5000';
+const BASE_URL = import.meta.env.VITE_QWEN_URL || '';
 
 // ── 通用请求 ──
 async function postQwen<T>(endpoint: string, data: Record<string, unknown>): Promise<T> {
