@@ -1,0 +1,63 @@
+{
+  "mcpServers": {
+    "corpus-analyzer": {
+      "command": "python",
+      "args": ["mcp-servers/corpus/server.py"],
+      "env": {},
+      "description": "语料库分析工具 - 索引行检索、搭配分析、主题建模(LDA)、情感态度分析、中文分词",
+      "capabilities": {
+        "tools": [
+          "concordance_search",
+          "collocation_analysis", 
+          "topic_modeling",
+          "sentiment_analysis",
+          "text_preprocessing",
+          "list_corpora"
+        ]
+      }
+    },
+    "literature-search": {
+      "command": "python",
+      "args": ["mcp-servers/literature/server.py"],
+      "env": {},
+      "description": "英文学术文献检索 - Semantic Scholar API + CrossRef API",
+      "capabilities": {
+        "tools": [
+          "search_literature",
+          "search_chinese_academic",
+          "get_paper_details",
+          "search_by_doi"
+        ]
+      }
+    },
+    "cnki-scraper": {
+      "command": "python",
+      "args": ["mcp-servers/cnki-scraper/server.py"],
+      "env": {},
+      "description": "中文学术文献检索 - OpenAlex + 百度学术，聚合CNKI/万方/维普",
+      "capabilities": {
+        "tools": [
+          "search_cnki_via_openalex",
+          "search_openalex_all",
+          "get_paper_by_doi",
+          "search_baidu_xueshu",
+          "get_cnki_related"
+        ]
+      }
+    },
+    "statistics-search": {
+      "command": "python",
+      "args": ["mcp-servers/statistics/server.py"],
+      "env": {},
+      "description": "统计年鉴查询 + 地图地理编码 - 国家统计局 + 世界银行 + OpenStreetMap",
+      "capabilities": {
+        "tools": [
+          "query_statistical_data",
+          "search_world_bank_indicators",
+          "geocode_location",
+          "list_available_stats"
+        ]
+      }
+    }
+  }
+}
